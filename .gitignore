@@ -1,0 +1,28 @@
+# Archivos del sistema y binarios compilados localmente
+.DS_Store
+tools/ocr
+tools/ocr_cache.json
+__pycache__/
+*.pyc
+
+# Documentos médicos personales e historiales autogenerados (si se usa el repo como plantilla)
+PENDIENTES_MEDICOS.md
+HISTORIAL_*.md
+0 INBOX/*
+!0 INBOX/.gitkeep
+!0 INBOX/Duplicados/
+0 INBOX/Duplicados/*
+!0 INBOX/Duplicados/.gitkeep
+1 a isapre/*
+!1 a isapre/.gitkeep
+2 a SURA/*
+!2 a SURA/.gitkeep
+3 pagadas/*
+!3 pagadas/.gitkeep
+RECETAS/*
+!RECETAS/README.md
+!RECETAS/archivadas/
+RECETAS/archivadas/*
+!RECETAS/archivadas/.gitkeep
+GES/*
+!GES/.gitkeep
