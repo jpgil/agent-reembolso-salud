@@ -1,6 +1,6 @@
 # agent-reembolso
 
-Flujo agéntico para gestionar **reembolsos médicos familiares** en Chile: boletas, bonos y órdenes médicas se llevan por etapas a través de una **Isapre** (Banmédica) y un **Seguro Complementario** (SURA), con seguimiento de lo pendiente e historiales médicos anuales por persona.
+Flujo agéntico para gestionar **reembolsos médicos familiares** en Chile: boletas, bonos y órdenes médicas se llevan por etapas a través de una **Isapre** y un **Seguro Complementario** (SURA), con seguimiento de lo pendiente e historiales médicos anuales por persona.
 
 El repositorio es una plantilla anonimizada: no contiene datos personales, solo el protocolo, los scripts y la estructura de carpetas. Un agente de IA de línea de comandos (`agy` o `claude`) sigue el protocolo de [`AGENTS.md`](AGENTS.md) y usa los scripts de `tools/` para hacer el trabajo repetitivo.
 

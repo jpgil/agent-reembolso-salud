@@ -6,6 +6,12 @@ Sistema agéntico de gestión de reembolsos médicos (Isapre + Seguro Complement
 > **Instalación asistida por IA:** Puedes abrir `agy` (o `claude`) en este directorio y pedirle simplemente:
 > *"Instala y configura este repositorio siguiendo `INSTALL.md`"*. El agente verificará las dependencias, te pedirá los datos de tus beneficiarios y dejará todo compilado y listo.
 
+> [!NOTE]
+> **Aseguradoras por defecto:** el repo viene configurado para una Isapre (Banmédica) y un seguro complementario (SURA). Cada usuario puede cambiarlas pidiéndoselo al agente instalador (por ejemplo: *"Usa otra Isapre y otro seguro, adapta `AGENTS.md` y los scripts"*).
+
+> [!WARNING]
+> **Versión de referencia:** estas instrucciones fueron probadas el **30 de octubre de 2026**. Si hay versiones nuevas de macOS, Xcode, Python, Poppler, `agy` o `claude`, puede ser necesario ajustar detalles técnicos. El agente debe tomar este documento como un ejemplo y adaptarlo, no como una receta literal.
+
 ---
 
 ## 1. Requisitos del Sistema (macOS)
