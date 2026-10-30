@@ -34,13 +34,33 @@ INSTALL.md    Instalación y personalización
 - `pdftotext` (`brew install poppler`).
 - Un agente CLI: Antigravity (`agy`) o Claude Code (`claude`). Claude Code necesita además el hook de [`tools/claude-agents-md-hook.sh`](tools/claude-agents-md-hook.sh) (y `jq`) para leer `AGENTS.md`.
 
-## Inicio rápido
+## Ejemplo de uso
 
-1. Clona el repositorio y abre `agy` o `claude` en su directorio.
-2. Pide: *"Instala y configura este repositorio siguiendo `INSTALL.md`"*. El agente verifica dependencias, te pregunta los datos de tus beneficiarios y deja todo listo.
-3. Para el uso diario, ejecuta `tools/agent-reembolso.sh` (usa `REEMBOLSO_AGENTE=claude` para Claude Code) y pide, por ejemplo, *"revisa qué hay pendiente"* o *"procesa lo que hay en Descargas"*.
+Para instalar, abre `agy` o `claude` en el directorio del repo y pide: *"Instala y configura este repositorio siguiendo `INSTALL.md`"*. Después, el uso diario parte con `tools/agent-reembolso.sh` (con `REEMBOLSO_AGENTE=claude` para Claude Code). Los nombres, fechas, IDs y montos de abajo son ficticios.
 
-También puedes usar el motor directamente:
+**Caso completo: una consulta pediátrica, desde la foto de la boleta hasta el depósito de SURA**
+
+1. **Foto de la boleta.** Vas a una consulta con la Dra. Ana Pérez, pagas y te llega la boleta por WhatsApp. La descargas en `~/Downloads` como `WhatsApp Image 2026-03-17 at 11.42.10.jpeg`.
+
+2. **Ingesta.** Abres el agente y le dices: *"Procesa lo que hay en Descargas"*. El agente corre `--scan-downloads`, detecta la imagen, extrae el texto con OCR y lee fecha, folio, monto y profesional. Luego crea `0 INBOX/20260317_Consulta_Pediatria_Dra_Ana_Perez/`, mueve (`mv`) allí la imagen renombrada y genera el `.txt` resumen con `ESTADO: PENDIENTE_ISAPRE`. Te avisa que identificó a Luciano como paciente y que el circuito es `ISAPRE_SURA`.
+
+3. **Subida a la Isapre.** Subes la boleta a la sucursal virtual de la Isapre, que te entrega el ID de solicitud, por ejemplo `600012345678`. Se lo das al agente: *"El ID es 600012345678"*. Él lo valida, actualiza el `.txt` (`ID_ISAPRE`, `ESTADO: EN_ISAPRE`) y mueve la carpeta a `1 a isapre/20260317_Consulta_Pediatria_Dra_Ana_Perez 600012345678`.
+
+4. **Liquidación.** Días después descargas `Comprobante-Liquidacion-398765432.pdf`. Le dices: *"Llegó la liquidación"*. El agente cruza el PDF con la boleta por su folio, lo mueve a la carpeta del trámite y calcula con `--match-liquidaciones`: monto $45.000, bonificación Isapre $12.000, copago $33.000 y estimado de SURA (80%) $26.400. El estado pasa a `LISTO_PARA_SURA`.
+
+5. **Envío a SURA.** Le pides: *"Vamos a enviar a SURA"*. El agente copia el RUT del paciente al portapapeles (`--copy-rut`), te indica el nombre exacto de la carpeta y los archivos que debes arrastrar uno por uno al WhatsApp de SURA: la boleta, el bono y la liquidación, sin el `.txt`. Los envías y SURA te responde con el ID, por ejemplo `20812345`.
+
+6. **Seguimiento.** Le das el ID: *"SURA me dio el 20812345"*. El agente actualiza el `.txt` (`ID_SURA`, `ESTADO: EN_SURA`) y mueve la carpeta a `2 a SURA/20260317_Consulta_Pediatria_Dra_Ana_Perez 600012345678 20812345`. Cada vez que preguntas *"¿qué hay pendiente?"*, el agente corre `--update` y te muestra el trámite en `PENDIENTES_MEDICOS.md`, con los $26.400 por recibir y los $6.600 que quedan de tu bolsillo (20%).
+
+7. **Pago.** SURA deposita en tu cuenta. Le avisas: *"SURA depositó $26.400"*. El agente anota `PAGADO_SURA: 26400` y `ESTADO: PAGADO`, mueve la carpeta a `3 pagadas/` (desde ahí es solo lectura) y regenera `HISTORIAL_LUCIANO.md` con una fila nueva:
+
+   ```text
+   | 2026-03-17 | Consulta Médica Pediátrica | Dra. Ana Pérez | `20260317_Consulta_Pediatria_Dra_Ana_Perez 600012345678 20812345.txt` |
+   ```
+
+Si pagas por transferencia antes de recibir la boleta, el agente crea el trámite en `0 INBOX` con `ESTADO: PENDIENTE_BOLETA` y te lo recuerda hasta que llegue. Los medicamentos van directo a SURA (`SOLO_SURA`), y las consultas de un beneficiario que solo tiene Isapre (`SOLO_ISAPRE`) se cierran en `3 pagadas` apenas tienen el ID.
+
+Para usar el motor sin agente:
 
 ```bash
 python3 tools/pendientes.py --update              # pendientes + historiales
