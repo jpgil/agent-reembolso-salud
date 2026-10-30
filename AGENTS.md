@@ -100,7 +100,7 @@ python3 tools/pendientes.py --extract "<ruta_archivo>"
 
 ## 6. Formato del Archivo `.txt`
 
-Todo directorio y toda receta en `RECETAS/` debe tener obligatoriamente un archivo `.txt` que lo resuma (homónimo al documento principal), con formato `CLAVE: VALOR`:
+Todo directorio debe tener obligatoriamente un `.txt` resumen **homónimo a la carpeta** (`<Nombre_Carpeta>.txt`) y toda receta en `RECETAS/` uno homónimo al documento, con formato `CLAVE: VALOR`. Los nombres deben ser únicos en todo el repositorio, porque el historial los cita como `Fuente`. Si una carpeta se renombra al cambiar de etapa (nuevos IDs), renombrar también su `.txt` resumen en ese mismo movimiento (antes de entrar a `3 pagadas`). Pueden coexistir otros `.txt` por documento (transcripciones); el resumen es el homónimo.
 
 ```text
 PACIENTE: Nombre Apellido Carga Uno
@@ -141,10 +141,18 @@ python3 tools/pendientes.py --update
 
 Actualiza [`PENDIENTES_MEDICOS.md`](PENDIENTES_MEDICOS.md) y los historiales anuales configurados en la Sección 3 (`HISTORIAL_<BENEFICIARIO>.md`).
 
+**Lógica de los historiales:**
+* Se generan desde el `.txt` resumen de cada carpeta en `0 INBOX`, `1 a isapre`, `2 a SURA` y `3 pagadas`, y desde los `.txt` de `RECETAS/`. Un `.txt` faltante implica una fila faltante.
+* **Ventana móvil:** desde el día 1 del mes de hace un año (ej. el 2026-10-30 se consideran los registros desde el 2025-10-01), según `FECHA` (fecha real de emisión).
+* **Secciones:** Consultas y Terapias, Procedimientos/Cirugías/Hospitalizaciones, Exámenes y Derivaciones, Medicamentos y Recetas Permanentes Vigentes (180 días).
+* **Formato de fila:** `| 2026-03-25 | Psicología (4 sesiones) | Nombre Apellido Profesional | `<archivo>.txt` |`: fecha sin formato, prestación corta (sin meses ni fechas), solo el nombre del profesional (sin especialidad ni paréntesis) y la fuente entre comillas invertidas. `PRESTACION` y `PROVEEDOR` de los `.txt` deben escribirse así.
+* **Columna `Fuente`:** nombre del `.txt` del que salió cada fila (sin ruta). Si una fila ya existe con esa fuente, manda la fila existente (así se respetan las ediciones manuales).
+* El paciente se determina por `PACIENTE`/`RUT_PACIENTE` del `.txt`. **Nunca se borran las filas existentes:** al regenerar se conservan todas las filas previas (incluidas las que el usuario anote a mano, en cualquier sección) y solo se agregan las nuevas. Está prohibido regenerar un historial ignorando sus filas previas.
+
 ---
 
 ## 8. Autoevaluación y Mantenimiento
 
 1. **Salud de herramientas:** Si `pdftotext`, `tools/ocr` o algún script falla o requiere recompilación, informarlo en esa misma respuesta y ofrecer repararlo de inmediato.
 2. **Auditoría de desvíos:** Revisar la salida `[SALUD DE HERRAMIENTAS Y AUDITORÍA DE PROCESO]` de `tools/pendientes.py` y proponer corregir cualquier alerta detectada.
-3. **Mejora continua y registro de cambios:** Cuando aparezca un paso manual repetitivo, un formato de documento no reconocido o un caso fuera de regla, informarlo en esa misma respuesta (tras completar la tarea en curso), ofrecer actualizar `tools/pendientes.py` o `AGENTS.md`, y registrar el cambio en [`tools/changelog.md`](tools/changelog.md) (documentando exclusivamente cambios técnicos de flujo/scripts; **prohibido incluir nombres de beneficiarios, RUTs, médicos o datos de reembolsos personales**).
+3. **Mejora continua y registro de cambios:** Cuando aparezca un paso manual repetitivo, un formato de documento no reconocido o un caso fuera de regla, informarlo en esa misma respuesta (tras completar la tarea en curso), ofrecer actualizar `tools/pendientes.py` o `AGENTS.md`, y registrar el cambio en [`tools/changelog.md`](tools/changelog.md). **Todo cambio de scripts o procesos, incluidas las mantenciones puntuales, debe quedar en el changelog** (documentando exclusivamente cambios técnicos de flujo/scripts; **prohibido incluir nombres de beneficiarios, RUTs, médicos o datos de reembolsos personales**).

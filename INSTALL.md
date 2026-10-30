@@ -3,7 +3,7 @@
 Sistema agéntico de gestión de reembolsos médicos (Isapre + Seguro Complementario SURA), seguimiento de transferencias pendientes de boleta (Nivel 0), cruce automático de liquidaciones desde `~/Downloads`, extracción híbrida de texto (`pdftotext -layout` + Apple Vision OCR nativo) e historiales médicos anuales en Markdown por beneficiario.
 
 > [!TIP]
-> **Instalación asistida por IA:** Puedes abrir `agy` en este directorio y pedirle simplemente:
+> **Instalación asistida por IA:** Puedes abrir `agy` (o `claude`) en este directorio y pedirle simplemente:
 > *"Instala y configura este repositorio siguiendo `INSTALL.md`"*. El agente verificará las dependencias, te pedirá los datos de tus beneficiarios y dejará todo compilado y listo.
 
 ---
@@ -19,7 +19,12 @@ Sistema agéntico de gestión de reembolsos médicos (Isapre + Seguro Complement
    ```bash
    brew install poppler
    ```
-4. **Antigravity CLI (`agy`)** instalado en `~/.local/bin/agy`.
+4. **Un agente CLI, a elección** (el repo funciona con cualquiera de los dos):
+   * **Antigravity CLI (`agy`)** instalado en `~/.local/bin/agy`.
+   * **Claude Code (`claude`)**, por ejemplo instalado en `~/.local/bin/claude`. Verifica con `which claude`.
+
+   > [!NOTE]
+   > Este repo usa la convención **`AGENTS.md`** (estándar multi-agente). `agy` la lee directamente; **Claude Code por sí solo solo busca `CLAUDE.md`**, así que para que lea `AGENTS.md` se instala un hook `SessionStart` (sin crear ningún `CLAUDE.md`). El script del hook viene en [`tools/claude-agents-md-hook.sh`](tools/claude-agents-md-hook.sh): inyecta como contexto el `AGENTS.md` de usuario (`~/.claude/AGENTS.md`), los de la cadena de directorios desde la raíz del proyecto hasta el directorio de trabajo y lista los anidados. Requiere `jq` (`brew install jq`). Instalación en el §3, Paso 3b.
 
 ---
 
@@ -37,7 +42,8 @@ Sistema agéntico de gestión de reembolsos médicos (Isapre + Seguro Complement
 │   └── archivadas/       # Recetas anteriores reemplazadas o vencidas
 ├── GES/                  # Respaldo de recetas y certificados GES permanentes
 ├── tools/
-│   ├── agent-reembolso.sh# Lanzador rápido de sesión con gemini-3.8-flash-low
+│   ├── claude-agents-md-hook.sh # Hook SessionStart de Claude Code que carga AGENTS.md
+│   ├── agent-reembolso.sh# Lanzador rápido de sesión (agy con gemini-3.8-flash-low, o claude con haiku)
 │   ├── changelog.md      # Registro de cambios técnicos del flujo (sin datos personales)
 │   ├── ocr.swift         # Código fuente de OCR nativo con Apple Vision
 │   └── pendientes.py     # Motor determinista (0% hardcoding) de ingesta, cruce, auditoría e historiales
@@ -59,13 +65,54 @@ swiftc -O tools/ocr.swift -o tools/ocr
 *(Nota: `tools/pendientes.py` también lo compila y repara automáticamente si detecta que no existe).*
 
 ### Paso 3: Instalar el lanzador rápido (`agent-reembolso.sh`)
-Verifica que la ruta en [`tools/agent-reembolso.sh`](tools/agent-reembolso.sh) apunte a tu carpeta de reembolsos y cópialo a `~/.local/bin/`:
+Verifica que la ruta en [`tools/agent-reembolso.sh`](tools/agent-reembolso.sh) apunte a tu carpeta de reembolsos y cópialo a `~/.local/bin/`. Por defecto abre `agy`; para usar Claude Code define `REEMBOLSO_AGENTE=claude`:
 
 ```bash
 mkdir -p ~/.local/bin
 cp tools/agent-reembolso.sh ~/.local/bin/agent-reembolso.sh
 chmod +x ~/.local/bin/agent-reembolso.sh
+
+agent-reembolso.sh                         # con agy (por defecto)
+REEMBOLSO_AGENTE=claude agent-reembolso.sh # con Claude Code
 ```
+
+Equivalencias manuales dentro de la carpeta de reembolsos:
+
+| | Antigravity | Claude Code |
+| :--- | :--- | :--- |
+| Sesión con prompt inicial | `agy -i "Revisa qué hay pendiente"` | `claude "Revisa qué hay pendiente"` |
+| Modelo económico | `--model gemini-3.8-flash-low` | `--model haiku` |
+| Saltar confirmaciones (riesgoso) | `--dangerously-skip-permissions` | `--dangerously-skip-permissions` |
+
+> [!WARNING]
+> `--dangerously-skip-permissions` desactiva todas las confirmaciones. El lanzador solo lo usa con `agy`; con `claude` se mantienen los permisos normales.
+
+### Paso 3b (solo Claude Code): Cargar `AGENTS.md` con un hook `SessionStart`
+```bash
+mkdir -p ~/.claude/hooks
+cp tools/claude-agents-md-hook.sh ~/.claude/hooks/agents-md.sh
+chmod +x ~/.claude/hooks/agents-md.sh
+```
+Registra el hook en `~/.claude/settings.json`, **agregándolo** al arreglo `SessionStart` sin reemplazar los hooks que ya tengas:
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agents-md.sh",
+            "timeout": 15,
+            "statusMessage": "Cargando AGENTS.md"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+Verifica abriendo `claude` en la carpeta de reembolsos: debe aparecer el mensaje "Cargando AGENTS.md" y el agente debe conocer las reglas del protocolo.
 
 ### Paso 4: Inicializar las vistas y verificar salud del entorno
 ```bash
@@ -105,5 +152,5 @@ Si el usuario te pide **"Instala este repositorio siguiendo `INSTALL.md`"**, sig
 3. **Instalar dependencias y compilar:**
    * Verifica `pdftotext` (`which pdftotext`); si falta, ofrece ejecutar `brew install poppler`.
    * Compila `swiftc -O tools/ocr.swift -o tools/ocr`.
-   * Copia `tools/agent-reembolso.sh` a `~/.local/bin/agent-reembolso.sh` con `chmod +x`.
+   * Copia `tools/agent-reembolso.sh` a `~/.local/bin/agent-reembolso.sh` con `chmod +x`. Si el usuario usa Claude Code, instala el hook del Paso 3b: copia `tools/claude-agents-md-hook.sh` a `~/.claude/hooks/agents-md.sh` y agrega la entrada a `~/.claude/settings.json` conservando los hooks existentes, pidiendo confirmación antes de editar ese archivo (nunca crees un `CLAUDE.md`).
    * Ejecuta `python3 tools/pendientes.py --update` y `python3 tools/pendientes.py --health` y confirma que `healthy: true`.

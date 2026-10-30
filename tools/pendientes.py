@@ -851,22 +851,107 @@ def audit_health_and_deviations(root: Path, patients: List[Dict[str, Any]]) -> D
 # GENERADOR DE HISTORIALES DESDE ARCHIVOS .TXT (SIN HARDCODING, OPCIONAL CON --historiales)
 # ==============================================================================
 def classify_category_from_meta(meta: Dict[str, Any], folder_name: str) -> str:
-    """Clasifica un registro en MEDICAMENTO, EXAMEN o CONSULTA a partir de su .txt."""
+    """Clasifica un registro en MEDICAMENTO, EXAMEN, PROCEDIMIENTO o CONSULTA a partir de su .txt."""
     text = f"{meta.get('prestacion', '')} {meta.get('circuito', '')} {folder_name}".lower()
     if meta.get("circuito") == "SOLO_SURA" or any(k in text for k in ("medicamento", "farmacia", "receta")):
         return "MEDICAMENTO"
-    if any(k in text for k in ("examen", "exámenes", "derivacion", "derivación", "interconsulta", "laboratorio", "biopsia", "histopatologico", "bioimpedanciometria", "hba1c")):
+    if any(k in text for k in ("examen", "exámenes", "derivacion", "derivación", "interconsulta", "laboratorio", "biopsia", "histopatologico", "histopatológico", "bioimpedanciometria", "hba1c")):
         return "EXAMEN"
+    if any(k in text for k in ("cirugia", "cirugía", "pabellon", "pabellón", "apendic", "hospitaliz", "procedimiento")):
+        return "PROCEDIMIENTO"
     return "CONSULTA"
 
 
-def generate_patient_histories(root: Path, patients: List[Dict[str, Any]]) -> List[str]:
-    """Genera los archivos HISTORIAL_<PERSONA>.md leyendo exclusivamente los archivos .txt de cada carpeta y de RECETAS/."""
+def pick_summary_txt(folder: Path) -> Optional[Path]:
+    """Elige el .txt resumen de una carpeta: el homónimo a la carpeta, luego el primero en formato CLAVE: VALOR, luego el primero."""
+    txts = sorted(f for f in folder.iterdir() if f.suffix == ".txt")
+    if not txts:
+        return None
+    for t in txts:
+        if t.stem == folder.name:
+            return t
+    for t in txts:
+        if re.search(r"^PACIENTE:", t.read_text(encoding="utf-8", errors="replace"), re.M):
+            return t
+    return txts[0]
+
+
+def shorten_history_text(prestacion: str, proveedor: str) -> Tuple[str, str]:
+    """Formato corto de las filas del historial: sin fechas/meses en la prestación y solo el nombre del profesional."""
+    pr = prestacion.strip()
+    pr = re.sub(r",\s*(?:\d{1,2}-)?[a-záéíóú]{3,10}[-\s]*\d{0,4}\)", ")", pr, flags=re.I)
+    pr = re.sub(r"\s*\(\d{1,2} al \d{1,2}-[a-z]{3}-\d{4}\)", "", pr, flags=re.I)
+    pv = proveedor.strip()
+    pv = re.split(r"\s+-\s+receta\b", pv, flags=re.I)[0]
+    m = re.search(r"\((Dra?\.[^)]*)\)", pv)
+    if m:
+        pv = re.split(r"\s+-\s+", m.group(1))[0].strip()
+    else:
+        pv = re.sub(r"\s*\([^)]*\)\s*$", "", pv).strip()
+    return pr, pv or "—"
+
+
+def history_row(r: Dict[str, str]) -> str:
+    """Fila Markdown del historial: fecha sin formato, fuente entre comillas invertidas."""
+    return f"| {r['fecha']} | {r['prestacion']} | {r['proveedor']} | `{r.get('fuente') or '—'}` |"
+
+
+HISTORY_SECTIONS = {"CONSULTA": "Consultas", "PROCEDIMIENTO": "Procedimientos", "EXAMEN": "Exámenes", "MEDICAMENTO": "Medicamentos"}
+
+
+def history_section_category(heading: str) -> Optional[str]:
+    """Categoría de una sección '## N. Título' del historial (por texto, tolera numeraciones anteriores).
+
+    Devuelve None para la sección de recetas (se regenera siempre) y 'OTRO' para secciones desconocidas
+    (anotaciones manuales), de modo que nada escrito a mano se pierda.
+    """
+    h = strip_accents(heading.lower())
+    if "receta" in h:
+        return None
+    for cat, key in HISTORY_SECTIONS.items():
+        if strip_accents(key.lower()) in h:
+            return cat
+    return "OTRO"
+
+
+def load_existing_history_rows(path: Path) -> Dict[str, List[Dict[str, str]]]:
+    """Lee las filas ya presentes en un HISTORIAL_<PERSONA>.md para no perderlas al regenerar
+    (incluye las anotadas a mano: fecha con o sin backticks, 2 a 4 columnas)."""
+    sections: Dict[str, List[Dict[str, str]]] = {c: [] for c in list(HISTORY_SECTIONS) + ["OTRO"]}
+    if not path.is_file():
+        return sections
+    current = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            current = history_section_category(line)
+            continue
+        if current is None or not line.startswith("|"):
+            continue
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
+        m = re.search(r"\d{4}-\d{2}-\d{2}", cols[0]) if cols else None
+        if not m or len(cols) < 2:
+            continue  # encabezado, separador o fila vacía "—"
+        sections[current].append({
+            "fecha": m.group(0),
+            "prestacion": cols[1],
+            "proveedor": cols[2] if len(cols) > 2 else "—",
+            "fuente": cols[3].strip("`") if len(cols) > 3 and cols[3] else "—",
+            "categoria": current,
+        })
+    return sections
+
+
+def generate_patient_histories(root: Path, patients: List[Dict[str, Any]], merge_existing: bool = True) -> List[str]:
+    """Genera los archivos HISTORIAL_<PERSONA>.md leyendo los .txt de cada carpeta y de RECETAS/.
+
+    Con merge_existing=True conserva además las filas ya presentes en el historial (no borra lo previo).
+    """
     if not patients:
         return []
 
     records_by_rut: Dict[str, List[Dict[str, Any]]] = {p["rut"]: [] for p in patients}
-    cutoff_date = (datetime.now() - timedelta(days=366)).strftime("%Y-%m-%d")
+    # Ventana móvil: desde el día 1 del mismo mes de hace un año (ej. hoy 2026-10-30 -> 2025-10-01)
+    cutoff_date = datetime.now().replace(year=datetime.now().year - 1, day=1).strftime("%Y-%m-%d")
 
     for stage_dir_name in ("0 INBOX", "1 a isapre", "2 a SURA", "3 pagadas"):
         sdir = root / stage_dir_name
@@ -875,27 +960,31 @@ def generate_patient_histories(root: Path, patients: List[Dict[str, Any]]) -> Li
         for folder in sorted(sdir.iterdir()):
             if not folder.is_dir() or folder.name.startswith(".") or folder.name in ("Duplicados", "tools"):
                 continue
-            txts = sorted([f for f in folder.iterdir() if f.suffix == ".txt"])
-            if not txts:
+            summary = pick_summary_txt(folder)
+            if summary is None:
                 continue
-            meta = parse_metadata_txt(txts[0])
+            meta = parse_metadata_txt(summary)
             fecha = normalize_date(meta.get("fecha", ""), folder.name)
             if not re.match(r"^\d{4}-\d{2}-\d{2}$", fecha) or fecha < cutoff_date:
                 continue
 
-            p_match = match_patient(f"{meta.get('paciente', '')} {meta.get('rut_paciente', '')} {meta.get('full_text', '')}", patients)
+            # Identificar por PACIENTE/RUT_PACIENTE; solo si faltan, recurrir al texto libre
+            who = f"{meta.get('paciente', '')} {meta.get('rut_paciente', '')}".strip() or meta.get("full_text", "")
+            p_match = match_patient(who, patients)
             if not p_match:
                 continue
 
             cat = classify_category_from_meta(meta, folder.name)
             prest = meta.get("prestacion") or folder.name
             prov = meta.get("proveedor") or "—"
+            prest, prov = shorten_history_text(prest, prov)
 
             records_by_rut[p_match["rut"]].append({
                 "fecha": fecha,
                 "categoria": cat,
                 "prestacion": prest,
                 "proveedor": prov,
+                "fuente": summary.name,
                 "legacy": meta.get("legacy", False),
             })
 
@@ -905,7 +994,8 @@ def generate_patient_histories(root: Path, patients: List[Dict[str, Any]]) -> Li
     if recetas_dir.is_dir():
         for txt_f in sorted(recetas_dir.glob("*.txt")):
             rmeta = parse_metadata_txt(txt_f)
-            p_match = match_patient(f"{rmeta.get('paciente', '')} {rmeta.get('rut_paciente', '')} {rmeta.get('full_text', '')}", patients)
+            who_r = f"{rmeta.get('paciente', '')} {rmeta.get('rut_paciente', '')}".strip() or rmeta.get("full_text", "")
+            p_match = match_patient(who_r, patients)
             if not p_match:
                 continue
             fec_em = normalize_date(rmeta.get("fecha", ""), txt_f.name)
@@ -920,15 +1010,24 @@ def generate_patient_histories(root: Path, patients: List[Dict[str, Any]]) -> Li
                 "prestacion": rmeta.get("prestacion") or txt_f.stem,
                 "proveedor": rmeta.get("proveedor") or "—",
                 "vence": vence_str,
+                "fuente": txt_f.name,
             })
 
     generated_files = []
     for p in patients:
         rut = p["rut"]
-        recs = sorted(records_by_rut.get(rut, []), key=lambda r: r["fecha"], reverse=True)
-        consultas = [r for r in recs if r["categoria"] == "CONSULTA"]
-        examenes = [r for r in recs if r["categoria"] == "EXAMEN"]
-        medicamentos = [r for r in recs if r["categoria"] == "MEDICAMENTO"]
+        recs = list(records_by_rut.get(rut, []))
+        if merge_existing:
+            # Las filas previas mandan (incluidas ediciones manuales): se conservan todas y solo se
+            # agregan las generadas cuya fuente o (categoría, fecha, prestación) aún no estén presentes.
+            prev = [r for rows in load_existing_history_rows(root / p["historial_file"]).values() for r in rows]
+            fuentes_prev = {r["fuente"] for r in prev if r.get("fuente") not in (None, "", "—")}
+            seen = {(r["categoria"], r["fecha"], r["prestacion"].strip().lower()) for r in prev}
+            nuevas = [r for r in recs
+                      if r["fuente"] not in fuentes_prev
+                      and (r["categoria"], r["fecha"], r["prestacion"].strip().lower()) not in seen]
+            recs = prev + nuevas
+        recs = sorted(recs, key=lambda r: r["fecha"], reverse=True)
         recetas_vig = recetas_by_rut.get(rut, [])
 
         lines = [
@@ -936,58 +1035,41 @@ def generate_patient_histories(root: Path, patients: List[Dict[str, Any]]) -> Li
             "",
             f"* **Paciente:** {p['canonical']} (`{p['rut']}`)",
             f"* **Período:** Últimos 12 meses (desde `{cutoff_date}`)",
-            "",
-            "---",
-            "",
-            "## 1. Consultas Médicas, Procedimientos y Hospitalizaciones",
-            "| Fecha | Especialidad / Atención | Médico / Centro |",
-            "| :--- | :--- | :--- |",
         ]
-        if consultas:
-            for r in consultas:
-                lines.append(f"| `{r['fecha']}` | {r['prestacion']} | {r['proveedor']} |")
-        else:
-            lines.append("| — | *Sin consultas registradas en el último año* | — |")
+        sections = [
+            ("CONSULTA", "Consultas Médicas y Terapias", "Especialidad / Atención", "Médico / Centro", "Sin consultas registradas en el último año"),
+            ("PROCEDIMIENTO", "Procedimientos, Cirugías y Hospitalizaciones", "Procedimiento", "Médico / Centro", "Sin procedimientos ni hospitalizaciones registrados en el último año"),
+            ("EXAMEN", "Exámenes de Laboratorio y Derivaciones", "Examen / Derivación", "Médico / Centro", "Sin exámenes ni derivaciones registradas en el último año"),
+            ("MEDICAMENTO", "Medicamentos", "Medicamento(s)", "Médico / Proveedor", "Sin compras de medicamentos registradas en el último año"),
+        ]
+        for n, (cat, title, col_prest, col_prov, empty_msg) in enumerate(sections, start=1):
+            lines.extend(["", "---", "", f"## {n}. {title}",
+                          f"| Fecha | {col_prest} | {col_prov} | Fuente |", "| :--- | :--- | :--- | :--- |"])
+            rows = [r for r in recs if r["categoria"] == cat]
+            if rows:
+                for r in rows:
+                    lines.append(history_row(r))
+            else:
+                lines.append(f"| — | *{empty_msg}* | — | — |")
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 2. Exámenes de Laboratorio y Derivaciones",
-            "| Fecha | Examen / Derivación | Médico / Centro |",
-            "| :--- | :--- | :--- |",
-        ])
-        if examenes:
-            for r in examenes:
-                lines.append(f"| `{r['fecha']}` | {r['prestacion']} | {r['proveedor']} |")
-        else:
-            lines.append("| — | *Sin exámenes ni derivaciones registradas en el último año* | — |")
-
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 3. Medicamentos",
-            "| Fecha | Medicamento(s) | Médico / Proveedor |",
-            "| :--- | :--- | :--- |",
-        ])
-        if medicamentos:
-            for r in medicamentos:
-                lines.append(f"| `{r['fecha']}` | {r['prestacion']} | {r['proveedor']} |")
-        else:
-            lines.append("| — | *Sin compras de medicamentos registradas en el último año* | — |")
+        otros = [r for r in recs if r["categoria"] == "OTRO"]
+        if otros:
+            lines.extend(["", "---", "", f"## {len(sections) + 1}. Otros registros (anotados a mano)",
+                          "| Fecha | Detalle | Médico / Centro | Fuente |", "| :--- | :--- | :--- | :--- |"])
+            for r in otros:
+                lines.append(history_row(r))
 
         if recetas_vig:
             lines.extend([
                 "",
                 "---",
                 "",
-                "## 4. Recetas Permanentes Vigentes (180 días)",
-                "| Fecha Emisión | Medicamentos Recetados | Médico | Vence |",
-                "| :--- | :--- | :--- | :--- |",
+                f"## {len(sections) + 1 + (1 if otros else 0)}. Recetas Permanentes Vigentes (180 días)",
+                "| Fecha Emisión | Medicamentos Recetados | Médico | Vence | Fuente |",
+                "| :--- | :--- | :--- | :--- | :--- |",
             ])
             for rv in recetas_vig:
-                lines.append(f"| `{rv['fecha']}` | {rv['prestacion']} | {rv['proveedor']} | {rv['vence']} |")
+                lines.append(f"| {rv['fecha']} | {rv['prestacion']} | {rv['proveedor']} | {rv['vence']} | `{rv['fuente']}` |")
 
         out_file = root / p["historial_file"]
         out_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1268,6 +1350,8 @@ def main():
         doc_path = root / "PENDIENTES_MEDICOS.md"
         doc_path.write_text(md_text, encoding="utf-8")
         print(f"✓ PENDIENTES_MEDICOS.md actualizado exitosamente.")
+        gen = generate_patient_histories(root, patients)
+        print(f"✓ Historiales actualizados: {', '.join(gen)}")
         print(f"✓ Total global estimado a recuperar: {format_currency(data['total_global'])}")
         h = data.get("health_and_audit", {})
         if not h.get("healthy"):
