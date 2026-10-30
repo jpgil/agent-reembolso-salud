@@ -63,4 +63,4 @@ Creado por **Juan Pablo Gil Ramírez**.
 
 ## Licencia
 
-Distribuido bajo la **Licencia MIT**: puedes usar, copiar, modificar y distribuir el software, incluso con fines comerciales, conservando el aviso de copyright. Se entrega «tal cual», sin garantías. Texto completo en [`LICENSE`](LICENSE).
+Distribuido bajo la **Licencia BSD de 3 cláusulas**: puedes usar, copiar, modificar y redistribuir el software, con o sin cambios y también con fines comerciales, siempre que conserves el aviso de copyright y la licencia, y no uses el nombre del autor para promocionar derivados sin permiso. Se entrega «tal cual», sin garantías. Texto completo en [`LICENSE`](LICENSE).
